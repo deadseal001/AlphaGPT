@@ -67,14 +67,40 @@ class DBManager:
         if not records: return
         async with self.pool.acquire() as conn:
             try:
-                await conn.copy_records_to_table(
-                    'ohlcv',
-                    records=records,
-                    columns=['time', 'address', 'open', 'high', 'low', 'close', 
-                             'volume', 'liquidity', 'fdv', 'source'],
-                    timeout=60
-                )
-            except asyncpg.UniqueViolationError:
-                pass # 忽略重复
+                async with conn.transaction():
+                    # Create a temp table to stage the data
+                    await conn.execute("""
+                        CREATE TEMP TABLE IF NOT EXISTS tmp_ohlcv (
+                            time TIMESTAMP,
+                            address TEXT,
+                            open DOUBLE PRECISION,
+                            high DOUBLE PRECISION,
+                            low DOUBLE PRECISION,
+                            close DOUBLE PRECISION,
+                            volume DOUBLE PRECISION,
+                            liquidity DOUBLE PRECISION, 
+                            fdv DOUBLE PRECISION,
+                            source TEXT
+                        ) ON COMMIT DROP;
+                    """)
+
+                    # Bulk copy into the temp table
+                    await conn.copy_records_to_table(
+                        'tmp_ohlcv',
+                        records=records,
+                        columns=['time', 'address', 'open', 'high', 'low', 'close', 
+                                 'volume', 'liquidity', 'fdv', 'source'],
+                        timeout=60
+                    )
+
+                    # Insert from temp table to main table with conflict handling
+                    # We accept new data and ignore existing keys
+                    await conn.execute("""
+                        INSERT INTO ohlcv (time, address, open, high, low, close, volume, liquidity, fdv, source)
+                        SELECT DISTINCT ON (time, address) * 
+                        FROM tmp_ohlcv
+                        ON CONFLICT (time, address) DO NOTHING;
+                    """)
+                    
             except Exception as e:
                 logger.error(f"Batch insert error: {e}")
