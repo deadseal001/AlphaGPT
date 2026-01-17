@@ -1,7 +1,10 @@
+# model_core/engine.py (建议全文件替换)
+
 import torch
 from torch.distributions import Categorical
 from tqdm import tqdm
 import json
+import numpy as np # 需要 import numpy
 
 from .config import ModelConfig
 from .data_loader import CryptoDataLoader
@@ -13,11 +16,6 @@ class AlphaEngine:
     def __init__(self, use_lord_regularization=True, lord_decay_rate=1e-3, lord_num_iterations=5):
         """
         Initialize AlphaGPT training engine.
-        
-        Args:
-            use_lord_regularization: Enable Low-Rank Decay (LoRD) regularization
-            lord_decay_rate: Strength of LoRD regularization
-            lord_num_iterations: Number of Newton-Schulz iterations per step
         """
         self.loader = CryptoDataLoader()
         self.loader.load_data()
@@ -58,9 +56,6 @@ class AlphaEngine:
 
     def train(self):
         print("🚀 Starting Meme Alpha Mining with LoRD Regularization..." if self.use_lord else "🚀 Starting Meme Alpha Mining...")
-        if self.use_lord:
-            print(f"   LoRD Regularization enabled")
-            print(f"   Target keywords: ['q_proj', 'k_proj', 'attention', 'qk_norm']")
         
         pbar = tqdm(range(ModelConfig.TRAIN_STEPS))
         
@@ -71,6 +66,7 @@ class AlphaEngine:
             log_probs = []
             tokens_list = []
             
+            # 生成阶段
             for _ in range(ModelConfig.MAX_FORMULA_LEN):
                 logits, _, _ = self.model(inp)
                 dist = Categorical(logits=logits)
@@ -84,26 +80,44 @@ class AlphaEngine:
             
             rewards = torch.zeros(bs, device=ModelConfig.DEVICE)
             
-            for i in range(bs):
-                formula = seqs[i].tolist()
+            # --- 优化核心：Batch 内去重 (Batch Deduplication) ---
+            # 转换成 list of tuples 以便哈希去重
+            seqs_list = seqs.tolist()
+            seqs_tuples = [tuple(s) for s in seqs_list]
+            unique_formulas = set(seqs_tuples)
+            
+            # 缓存当前 Batch 的计算结果
+            formula_rewards_map = {}
+            
+            # 只对唯一的公式进行回测
+            for formula_tuple in unique_formulas:
+                formula = list(formula_tuple)
                 
+                # VM 执行
                 res = self.vm.execute(formula, self.loader.feat_tensor)
                 
                 if res is None:
-                    rewards[i] = -5.0
+                    formula_rewards_map[formula_tuple] = -5.0
                     continue
                 
                 if res.std() < 1e-4:
-                    rewards[i] = -2.0
+                    formula_rewards_map[formula_tuple] = -2.0
                     continue
                 
+                # 回测
                 score, ret_val = self.bt.evaluate(res, self.loader.raw_data_cache, self.loader.target_ret)
-                rewards[i] = score
+                formula_rewards_map[formula_tuple] = score
                 
+                # 记录最佳
                 if score.item() > self.best_score:
                     self.best_score = score.item()
                     self.best_formula = formula
                     tqdm.write(f"[!] New King: Score {score:.2f} | Ret {ret_val:.2%} | Formula {formula}")
+            
+            # 将分数映射回原来的 Batch 索引
+            for i in range(bs):
+                rewards[i] = formula_rewards_map[seqs_tuples[i]]
+            # ----------------------------------------------------
             
             # Normalize rewards
             adv = (rewards - rewards.mean()) / (rewards.std() + 1e-5)
@@ -111,15 +125,15 @@ class AlphaEngine:
             loss = 0
             for t in range(len(log_probs)):
                 loss += -log_probs[t] * adv
-            
             loss = loss.mean()
             
-            # Gradient step
+            if torch.isnan(loss) or torch.isinf(loss):
+                continue 
+            
             self.opt.zero_grad()
             loss.backward()
             self.opt.step()
             
-            # Apply Low-Rank Decay regularization
             if self.use_lord:
                 self.lord_opt.step()
             
@@ -138,19 +152,15 @@ class AlphaEngine:
             
             pbar.set_postfix(postfix_dict)
 
-        # Save best formula
+        # Save results
         with open("best_meme_strategy.json", "w") as f:
             json.dump(self.best_formula, f)
-        
-        # Save training history
         import json as js
         with open("training_history.json", "w") as f:
             js.dump(self.training_history, f)
         
         print(f"\n✓ Training completed!")
         print(f"  Best score: {self.best_score:.4f}")
-        print(f"  Best formula: {self.best_formula}")
-
 
 if __name__ == "__main__":
     eng = AlphaEngine(use_lord_regularization=True)
