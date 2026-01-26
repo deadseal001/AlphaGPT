@@ -11,12 +11,12 @@ class Config:
     DB_NAME = os.getenv("DB_NAME", "crypto_quant")
     DB_DSN = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     CHAIN = "solana"
-    TIMEFRAME = "1m" # 也支持 15min
-    MIN_LIQUIDITY_USD = 500000.0  
+    TIMEFRAME = "1m" # Birdeye API supports: 1m, 3m, 5m, 15m, 30m, 1H, 2H, 4H, 6H, 8H, 12H, 1D, 1W
+    MIN_LIQUIDITY_USD = 0.0  
     MIN_FDV = 10000000.0            
     MAX_FDV = float('inf') 
     BIRDEYE_API_KEY = os.getenv("BIRDEYE_API_KEY", "")
-    BIRDEYE_IS_PAID = False
+    BIRDEYE_IS_PAID = True
     USE_DEXSCREENER = False
     CONCURRENCY = 1
     HISTORY_DAYS = 7
