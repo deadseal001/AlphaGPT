@@ -18,7 +18,7 @@ class MemeBacktest:
             is_safe = (liquidity > self.min_liq).float()
             
         # LOWER THRESHOLD to 0.6 to encourage early trading
-        position = (signal > 0.6).float() * is_safe
+        position = (signal > 0.7).float() * is_safe
         
         # ... (slippage logic same as before) ...
         denom = liquidity + 1e-9
@@ -39,7 +39,10 @@ class MemeBacktest:
         cum_ret = net_pnl.sum(dim=1)
         
         big_drawdowns = (net_pnl < -0.05).float().sum(dim=1)
-        score = cum_ret - (big_drawdowns * 2.0)
+        
+        # Increase weight of cumulative return (e.g., multiply by 5.0)
+        # Decrease relative impact of drawdown penalty
+        score1 = (cum_ret * 1.0) - (big_drawdowns * 2.0)
         
         activity = position.sum(dim=1)
         
@@ -47,7 +50,7 @@ class MemeBacktest:
         # If activity < 5, penalize by distance from 5.
         # e.g., activity 0 => penalty -2.5. activity 4 => penalty -0.5
         penalty = torch.clamp(5 - activity, min=0) * 0.5
-        score = score - penalty
+        score = score1 - penalty
         
         final_fitness = torch.median(score)
-        return final_fitness, cum_ret.mean().item()
+        return final_fitness, cum_ret.mean().item(), big_drawdowns
