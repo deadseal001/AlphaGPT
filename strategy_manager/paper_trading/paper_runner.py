@@ -57,11 +57,15 @@ class PaperStrategyRunner:
                 
                 # Sync data (Simulate live feed)
                 if time.time() - self.last_scan_time > 120: 
-                    logger.info("Scanning for new data...")
-                    await self.data_mgr.pipeline_sync_daily()
+                    logger.info("⚡️ Initiating Data Pipeline Sync...")
+                    held_tokens = list(self.portfolio.positions.keys())
+                    await self.data_mgr.pipeline_sync_daily(held_tokens=held_tokens)
+                    logger.info("✅ Data Pipeline Sync Completed")
                     self.last_scan_time = time.time()
 
-                self.loader.load_data(limit_tokens=300)
+                held_tokens = list(self.portfolio.positions.keys())
+                # For paper trading: strict 30 min staleness requirement
+                self.loader.load_data(limit_tokens=300, mandatory_tokens=held_tokens, max_staleness_minutes=30)
                 await self._build_token_mapping()
 
                 await self.monitor_positions()
@@ -86,8 +90,13 @@ class PaperStrategyRunner:
         cash = self.trader.balance
         holdings_value = 0.0
         
+        # Fetch SOL price for USD conversion
+        sol_address = "So11111111111111111111111111111111111111112"
+        sol_price_usd = await self.data_mgr.birdeye.get_token_price(sol_address)
+        if sol_price_usd == 0: sol_price_usd = 150.0 # Fallback if fetch fails
+        
         logger.info("============== 📝 PAPER ACCOUNT DASHBOARD ==============")
-        logger.info(f"💰 Cash Balance: {cash:.4f} SOL")
+        logger.info(f"💰 Cash Balance: {cash:.4f} SOL (${cash * sol_price_usd:.2f})")
         logger.info(f"📦 Open Positions: {len(self.portfolio.positions)}")
         
         for token, pos in self.portfolio.positions.items():
@@ -95,29 +104,28 @@ class PaperStrategyRunner:
             val = pos.amount_held * curr_price
             holdings_value += val
             pnl_pct = (curr_price - pos.entry_price) / pos.entry_price * 100
-            logger.info(f"   - {token[:8]}...: {pnl_pct:+.2f}% | Val: {val:.2f} SOL")
+            
+            logger.info(f"   - {token[:8]}...: {pnl_pct:+.2f}% | Val: {val:.2f} SOL (${val * sol_price_usd:.2f})")
             
         total_equity = cash + holdings_value
-        # Assuming 10.0 initial, or we should track initial better. 
-        # For now hardcode 10.0 or use trader.initial_balance if we updated trader to store it.
-        initial = 10.0 
-        roi = (total_equity - initial) / initial * 100
+        total_equity_usd = total_equity * sol_price_usd
         
-        logger.info(f"💎 Total Equity: {total_equity:.4f} SOL")
-        logger.info(f"📈 Total Return: {roi:+.2f}%")
+        # Assuming 10.0 initial which was ~$1500 (example)
+        initial = 10.0 
+        initial_usd = initial * 150.0 # Just a baseline assumption for now, ideally track initial_usd
+        
+        roi_sol = (total_equity - initial) / initial * 100
+        
+        logger.info(f"💎 Total Equity: {total_equity:.4f} SOL (${total_equity_usd:.2f})")
+        logger.info(f"📈 Total Return (SOL): {roi_sol:+.2f}%")
+        logger.info(f"ℹ️  SOL Price: ${sol_price_usd:.2f}")
         logger.info("======================================================")
 
     async def _build_token_mapping(self):
-        query = """
-        SELECT address, count(*) as cnt 
-        FROM ohlcv 
-        GROUP BY address 
-        ORDER BY cnt DESC 
-        LIMIT 300
-        """
-        df = pd.read_sql(query, self.loader.engine)
-        addresses = df['address'].tolist()
-        self.token_map = {addr: idx for idx, addr in enumerate(addresses)}
+        if hasattr(self.loader, 'tokens'):
+            self.token_map = {addr: idx for idx, addr in enumerate(self.loader.tokens)}
+        else:
+            self.token_map = {}
 
     async def _fetch_live_price_paper(self, token_address):
         q = f"SELECT time, close FROM ohlcv WHERE address='{token_address}' ORDER BY time DESC LIMIT 1"
