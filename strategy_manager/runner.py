@@ -8,7 +8,10 @@ import pandas as pd
 from data_pipeline.data_manager import DataManager
 from model_core.vm import StackVM
 from model_core.data_loader import CryptoDataLoader
+from model_core.ops import OPS_CONFIG
+from model_core.factors import FeatureEngineer
 from execution.trader import SolanaTrader
+from execution.config import ExecutionConfig
 from execution.utils import get_mint_decimals
 from .config import StrategyConfig
 from .portfolio import PortfolioManager
@@ -48,12 +51,16 @@ class StrategyRunner:
             try:
                 loop_start = time.time()
                 
+                # Sync data (Simulate live feed)
                 if time.time() - self.last_scan_time > 900: # 15 min
                     logger.info("o.O | Syncing Data Pipeline...")
-                    await self.data_mgr.pipeline_sync_daily()
+                    held_tokens = list(self.portfolio.positions.keys())
+                    await self.data_mgr.pipeline_sync_daily(held_tokens=held_tokens)
                     self.last_scan_time = time.time()
 
-                self.loader.load_data(limit_tokens=300)
+                held_tokens = list(self.portfolio.positions.keys())
+                # For live trading: strict 30 min staleness requirement
+                self.loader.load_data(limit_tokens=300, mandatory_tokens=held_tokens, max_staleness_minutes=30)
                 await self._build_token_mapping()
 
                 await self.monitor_positions()
@@ -63,6 +70,8 @@ class StrategyRunner:
                 else:
                     logger.info("=-= | Max positions reached. Scanning skipped.")
                 
+                await self.print_dashboard()
+
                 elapsed = time.time() - loop_start
                 sleep_time = max(10, 60 - elapsed)
                 logger.info(f"Cycle finished in {elapsed:.2f}s. Sleeping {sleep_time:.2f}s...")
@@ -73,18 +82,13 @@ class StrategyRunner:
                 await asyncio.sleep(30)
 
     async def _build_token_mapping(self):
-        query = f"""
-        SELECT address, count(*) as cnt 
-        FROM ohlcv 
-        GROUP BY address 
-        ORDER BY cnt DESC 
-        LIMIT 300
-        """
-        df = pd.read_sql(query, self.loader.engine)
-        addresses = df['address'].tolist()
-        
-        self.token_map = {addr: idx for idx, addr in enumerate(addresses)}
-        logger.info(f"Mapped {len(self.token_map)} tokens for inference.")
+        # Map tokens from loader exactly as they appear in the tensor
+        if hasattr(self.loader, 'tokens'):
+            self.token_map = {addr: idx for idx, addr in enumerate(self.loader.tokens)}
+            logger.info(f"Mapped {len(self.token_map)} tokens for inference.")
+        else:
+            logger.error("Loader has no tokens attribute! Inference mapping will be wrong.")
+            self.token_map = {}
 
     async def monitor_positions(self):
         if not self.portfolio.positions: return
@@ -127,13 +131,67 @@ class StrategyRunner:
                     logger.info(f"🤖 | AI EXIT: {pos.symbol} Score: {ai_score:.2f}")
                     await self._execute_sell(token_addr, 1.0, "AI_Signal")
 
+
+    async def print_dashboard(self):
+        # Calculate Total Equity
+        cash = await self.trader.rpc.get_balance()
+        holdings_value = 0.0
+        
+        # Fetch SOL price for USD conversion
+        sol_address = "So11111111111111111111111111111111111111112"
+        sol_price_usd = await self.data_mgr.birdeye.get_token_price(sol_address)
+        if sol_price_usd == 0: sol_price_usd = 150.0 
+        
+        logger.info("============== 🚀 LIVE STRATEGY DASHBOARD ==============")
+        logger.info(f"💰 Wallet Balance: {cash:.4f} SOL (${cash * sol_price_usd:.2f})")
+        logger.info(f"📦 Open Positions: {len(self.portfolio.positions)}")
+        
+        for token, pos in self.portfolio.positions.items():
+            # Price already updated in monitor_positions
+            curr_price = pos.current_price if hasattr(pos, 'current_price') else 0.0 
+            # If not updated recently, fetch again? monitor_positions updates it.
+            if curr_price == 0:
+                 curr_price = await self._fetch_live_price_sol(token)
+
+            val = pos.amount_held * curr_price
+            holdings_value += val
+            pnl_pct = (curr_price - pos.entry_price) / pos.entry_price * 100
+            
+            logger.info(f"   - {pos.symbol} ({token[:4]}..): {pnl_pct:+.2f}% | Val: {val:.2f} SOL (${val * sol_price_usd:.2f})")
+            
+        total_equity = cash + holdings_value
+        total_equity_usd = total_equity * sol_price_usd
+        
+        logger.info(f"💎 Total Equity: {total_equity:.4f} SOL (${total_equity_usd:.2f})")
+        logger.info(f"ℹ️  SOL Price: ${sol_price_usd:.2f}")
+        logger.info("======================================================")
+
     async def scan_for_entries(self):
         raw_signals = self.vm.execute(self.formula, self.loader.feat_tensor)
         
         if raw_signals is None: return
 
         latest_signals = raw_signals[:, -1]
+        # Debug signal distribution
+        try:
+            sig_min = float(latest_signals.min().item())
+            sig_max = float(latest_signals.max().item())
+            sig_mean = float(latest_signals.mean().item())
+            sig_std = float(latest_signals.std().item())
+            logger.info(f"📊 | Signal stats (latest): min={sig_min:.6f}, max={sig_max:.6f}, mean={sig_mean:.6f}, std={sig_std:.6f}")
+            if sig_std < 1e-6 and abs(sig_mean) < 1e-6:
+                logger.warning("⚠️  | Sanity check: signals are flat (all ~0). Strategy may be degenerate.")
+                logger.warning(f"🧪 | Strategy tokens: {self.formula}")
+                logger.warning(f"🧪 | Strategy decoded: {self._decode_formula(self.formula)}")
+        except Exception:
+            pass
         scores = torch.sigmoid(latest_signals).cpu().numpy() # 转为概率 0~1
+
+        # Log signal score for each token (for debugging)
+        idx_to_addr = {v: k for k, v in self.token_map.items()}
+        for idx, score in enumerate(scores):
+            token_addr = idx_to_addr.get(idx, "UNKNOWN")
+            logger.info(f"🤖 | Signal: {token_addr} | Score: {score:.4f}")
         
         # 翻转排序，从高分到低分处理
         sorted_indices = scores.argsort()[::-1]
@@ -152,7 +210,9 @@ class StrategyRunner:
             if not token_addr: continue
             
             # 过滤已持仓
-            if token_addr in self.portfolio.positions: continue
+            if token_addr in self.portfolio.positions:
+                logger.info(f"⏭️ | Skip {token_addr}: already in portfolio")
+                continue
             
             # 从 loader 缓存获取该 Token 的最新流动性
             # raw_data_cache['liquidity']: [Tokens, Time]
@@ -163,10 +223,33 @@ class StrategyRunner:
             is_safe = await self.risk.check_safety(token_addr, liq_usd)
             if is_safe:
                 await self._execute_buy(token_addr, score)
+            else:
+                logger.info(f"⛔ | Risk check failed: {token_addr}")
                 
                 # 检查仓位上限
                 if self.portfolio.get_open_count() >= StrategyConfig.MAX_OPEN_POSITIONS:
                     break
+
+    def _decode_formula(self, formula_tokens):
+        feat_names = ['RET', 'LIQ', 'PRESS', 'FOMO', 'DEV', 'LOG_VOL']
+        ops = [cfg[0] for cfg in OPS_CONFIG]
+        decoded = []
+        for tok in formula_tokens:
+            try:
+                t = int(tok)
+            except Exception:
+                decoded.append(str(tok))
+                continue
+            if t < FeatureEngineer.INPUT_DIM:
+                name = feat_names[t] if t < len(feat_names) else f"FEAT_{t}"
+                decoded.append(name)
+            else:
+                op_idx = t - FeatureEngineer.INPUT_DIM
+                if 0 <= op_idx < len(ops):
+                    decoded.append(ops[op_idx])
+                else:
+                    decoded.append(f"OP_{t}")
+        return decoded
 
     async def _execute_buy(self, token_addr, score):
         balance = await self.trader.rpc.get_balance()
@@ -180,7 +263,7 @@ class StrategyRunner:
         
         amount_lamports = int(amount_sol * 1e9)
         quote = await self.trader.jup.get_quote(
-            input_mint=self.trader.config.SOL_MINT,
+            input_mint=ExecutionConfig.SOL_MINT,
             output_mint=token_addr,
             amount_integer=amount_lamports
         )
