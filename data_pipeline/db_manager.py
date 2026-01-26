@@ -52,6 +52,17 @@ class DBManager:
 
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_ohlcv_address ON ohlcv (address);")
 
+    async def get_latest_timestamp(self, address):
+        """Get the latest timestamp for a token's OHLCV data."""
+        async with self.pool.acquire() as conn:
+            val = await conn.fetchval("SELECT MAX(time) FROM ohlcv WHERE address = $1", address)
+            return val
+
+    async def delete_future_data(self, address, cutoff_dt):
+        """Delete data points that are in the future (likely due to timezone mismatch)."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("DELETE FROM ohlcv WHERE address = $1 AND time > $2", address, cutoff_dt)
+
     async def upsert_tokens(self, tokens):
         if not tokens: return
         async with self.pool.acquire() as conn:
@@ -94,12 +105,20 @@ class DBManager:
                     )
 
                     # Insert from temp table to main table with conflict handling
-                    # We accept new data and ignore existing keys
+                    # Update existing records to ensure we have the latest version
                     await conn.execute("""
                         INSERT INTO ohlcv (time, address, open, high, low, close, volume, liquidity, fdv, source)
                         SELECT DISTINCT ON (time, address) * 
                         FROM tmp_ohlcv
-                        ON CONFLICT (time, address) DO NOTHING;
+                        ON CONFLICT (time, address) DO UPDATE 
+                        SET open = EXCLUDED.open,
+                            high = EXCLUDED.high,
+                            low = EXCLUDED.low,
+                            close = EXCLUDED.close,
+                            volume = EXCLUDED.volume,
+                            liquidity = EXCLUDED.liquidity,
+                            fdv = EXCLUDED.fdv,
+                            source = EXCLUDED.source;
                     """)
                     
             except Exception as e:
