@@ -1,34 +1,4 @@
 {
-  "CxWPdDBqxVo3fnTMRTvNuSrd4gkp78udSrFvkVDBAGS": {
-    "token_address": "CxWPdDBqxVo3fnTMRTvNuSrd4gkp78udSrFvkVDBAGS",
-    "symbol": "UNKNOWN",
-    "entry_price": 0.004022123567176503,
-    "entry_time": 1768663355.747936,
-    "amount_held": 497.2497653531772,
-    "initial_cost_sol": 2.0,
-    "highest_price": 0.004022123567176503,
-    "is_moonbag": false
-  },
-  "jk1T35eWK41MBMM8AWoYVaNbjHEEQzMDetTsfnqpump": {
-    "token_address": "jk1T35eWK41MBMM8AWoYVaNbjHEEQzMDetTsfnqpump",
-    "symbol": "UNKNOWN",
-    "entry_price": 0.00855432889455576,
-    "entry_time": 1768663355.751913,
-    "amount_held": 233.7997550307964,
-    "initial_cost_sol": 2.0,
-    "highest_price": 0.00855432889455576,
-    "is_moonbag": false
-  },
-  "4TyZGqRLG3VcHTGMcLBoPUmqYitMVojXinAmkL8xpump": {
-    "token_address": "4TyZGqRLG3VcHTGMcLBoPUmqYitMVojXinAmkL8xpump",
-    "symbol": "UNKNOWN",
-    "entry_price": 0.018558864048085627,
-    "entry_time": 1768663355.754955,
-    "amount_held": 107.765216384906,
-    "initial_cost_sol": 2.0,
-    "highest_price": 0.018558864048085627,
-    "is_moonbag": false
-  },
   "74SBV4zDXxTRgv1pEMoECskKBkZHc2yGPnc7GYVepump": {
     "token_address": "74SBV4zDXxTRgv1pEMoECskKBkZHc2yGPnc7GYVepump",
     "symbol": "UNKNOWN",
@@ -36,17 +6,7 @@
     "entry_time": 1768663355.758023,
     "amount_held": 140.05615002895644,
     "initial_cost_sol": 2.0,
-    "highest_price": 0.014279986987979483,
-    "is_moonbag": false
-  },
-  "7pskt3A1Zsjhngazam7vHWjWHnfgiRump916Xj7ABAGS": {
-    "token_address": "7pskt3A1Zsjhngazam7vHWjWHnfgiRump916Xj7ABAGS",
-    "symbol": "UNKNOWN",
-    "entry_price": 4.125103064427888e-06,
-    "entry_time": 1768663355.7619462,
-    "amount_held": 484836.3710586176,
-    "initial_cost_sol": 2.0,
-    "highest_price": 4.125103064427888e-06,
+    "highest_price": 0.015136450057624077,
     "is_moonbag": false
   }
 }
