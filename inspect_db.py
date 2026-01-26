@@ -64,6 +64,40 @@ async def inspect_database():
     else:
         print("  No data in ohlcv table")
     
+    # Most recent OHLCV record for each token
+    print("\n=== MOST RECENT OHLCV RECORD PER TOKEN ===")
+    recent_records = await conn.fetch("""
+        WITH latest AS (
+            SELECT address, MAX(time) as max_ts
+            FROM ohlcv
+            GROUP BY address
+        )
+        SELECT 
+            t.symbol,
+            o.address,
+            o.time,
+            o.close,
+            o.volume
+        FROM ohlcv o
+        JOIN latest l ON o.address = l.address AND o.time = l.max_ts
+        LEFT JOIN tokens t ON o.address = t.address
+        ORDER BY o.time DESC
+        LIMIT 20;
+    """)
+    
+    if recent_records:
+        print(f"  {'Symbol':<12} {'Address':<12} {'Latest Timestamp':<22} {'Close':<12} {'Volume'}")
+        print("  " + "-" * 90)
+        for rec in recent_records:
+            symbol = rec['symbol'] or 'Unknown'
+            addr_short = rec['address'][:8] + "..."
+            ts = rec['time'].strftime('%Y-%m-%d %H:%M:%S') if rec['time'] else 'N/A'
+            close = f"{rec['close']:.6f}" if rec['close'] else 'N/A'
+            volume = f"{rec['volume']:.2f}" if rec['volume'] else 'N/A'
+            print(f"  {symbol:<12} {addr_short:<12} {ts:<22} {close:<12} {volume}")
+    else:
+        print("  No OHLCV data found")
+    
     await conn.close()
     print("\n✓ Inspection complete!\n")
 
