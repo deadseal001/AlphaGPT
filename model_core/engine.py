@@ -10,6 +10,7 @@ from .config import ModelConfig
 from .data_loader import CryptoDataLoader
 from .alphagpt import AlphaGPT, NewtonSchulzLowRankDecay, StableRankMonitor
 from .vm import StackVM
+from .ops import OPS_CONFIG
 from .backtest import MemeBacktest
 
 class AlphaEngine:
@@ -18,7 +19,8 @@ class AlphaEngine:
         Initialize AlphaGPT training engine.
         """
         self.loader = CryptoDataLoader()
-        self.loader.load_data()
+        # For training: use 24 hour staleness (Birdeye API has delays, not truly real-time)
+        self.loader.load_data(days=7, max_staleness_minutes=1440)  # 24 hours
         
         self.model = AlphaGPT().to(ModelConfig.DEVICE)
         
@@ -44,6 +46,10 @@ class AlphaEngine:
         
         self.vm = StackVM()
         self.bt = MemeBacktest()
+
+        # Penalize degenerate formulas dominated by JUMP
+        jump_idx = next((i for i, cfg in enumerate(OPS_CONFIG) if cfg[0] == 'JUMP'), None)
+        self.jump_token = self.vm.feat_offset + jump_idx if jump_idx is not None else None
         
         self.best_score = -float('inf')
         self.best_formula = None
@@ -103,16 +109,26 @@ class AlphaEngine:
                 if res.std() < 1e-4:
                     formula_rewards_map[formula_tuple] = -2.0
                     continue
+
+                # Penalize formulas that overuse JUMP (often collapses signals to ~0)
+                if self.jump_token is not None:
+                    jump_count = sum(1 for t in formula if int(t) == self.jump_token)
+                    if jump_count > 2:
+                        formula_rewards_map[formula_tuple] = -3.0 - 0.5 * (jump_count - 2)
+                        continue
                 
                 # 回测
-                score, ret_val = self.bt.evaluate(res, self.loader.raw_data_cache, self.loader.target_ret)
+                score, ret_val, big_drawdowns = self.bt.evaluate(res, self.loader.raw_data_cache, self.loader.target_ret)
+
+                # Add mild variance bonus to discourage flat signals
+                score = score + 0.1 * torch.tanh(res.std())
                 formula_rewards_map[formula_tuple] = score
                 
                 # 记录最佳
                 if score.item() > self.best_score:
                     self.best_score = score.item()
                     self.best_formula = formula
-                    tqdm.write(f"[!] New King: Score {score:.2f} | Ret {ret_val:.2%} | Formula {formula}")
+                    tqdm.write(f"[!] New King: Score {score:.2f} | Ret {ret_val:.2%} | Big Drawdowns {big_drawdowns.mean().item():.2f} | Formula {formula}")
             
             # 将分数映射回原来的 Batch 索引
             for i in range(bs):
