@@ -22,7 +22,8 @@ class RiskEngine:
             if not quote:
                 logger.warning(f"[x] Risk: Cannot verify sell path (Honeypot?)")
                 return False
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[x] Risk: Quote check failed: {e}")
             return False
             
         return True
