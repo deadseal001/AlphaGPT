@@ -16,7 +16,7 @@ def _op_jump(x: torch.Tensor) -> torch.Tensor:
     mean = x.mean(dim=1, keepdim=True)
     std = x.std(dim=1, keepdim=True) + 1e-6
     z = (x - mean) / std
-    return torch.relu(z - 3.0)
+    return torch.relu(z - 1.0)
 
 @torch.jit.script
 def _op_decay(x: torch.Tensor) -> torch.Tensor:
