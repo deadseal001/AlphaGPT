@@ -3,12 +3,14 @@ import base64
 import json
 from loguru import logger
 from solders.transaction import VersionedTransaction
+from solders.message import to_bytes_versioned
 from .config import ExecutionConfig
 
 class JupiterAggregator:
     def __init__(self):
-        self.base_url = "https://quote-api.jup.ag/v6"
+        self.base_url = "https://api.jup.ag/swap/v1"
         self.session = None
+        self.api_key = ExecutionConfig.JUPITER_API_KEY
 
     async def _get_session(self):
         if self.session is None:
@@ -27,7 +29,8 @@ class JupiterAggregator:
             "onlyDirectRoutes": "false",
             "asLegacyTransaction": "false"
         }
-        async with session.get(url, params=params) as resp:
+        headers = {"x-api-key": self.api_key} if self.api_key else {}
+        async with session.get(url, params=params, headers=headers) as resp:
             if resp.status != 200:
                 text = await resp.text()
                 logger.error(f"Jupiter Quote Error: {text}")
@@ -41,10 +44,10 @@ class JupiterAggregator:
             "quoteResponse": quote_response,
             "userPublicKey": ExecutionConfig.WALLET_ADDRESS,
             "wrapAndUnwrapSol": True,
-            "computeUnitPriceMicroLamports": "auto",
             "prioritizationFeeLamports": "auto"
         }
-        async with session.post(url, json=payload) as resp:
+        headers = {"x-api-key": self.api_key} if self.api_key else {}
+        async with session.post(url, json=payload, headers=headers) as resp:
             if resp.status != 200:
                 text = await resp.text()
                 logger.error(f"Jupiter Swap API Error: {text}")
@@ -61,7 +64,10 @@ class JupiterAggregator:
         try:
             tx_bytes = base64.b64decode(b64_tx_str)
             txn = VersionedTransaction.from_bytes(tx_bytes)
-            signature = ExecutionConfig.PAYER_KEYPAIR.sign_message(txn.message.to_bytes())
+            # Serialize the message properly for signing
+            message_bytes = to_bytes_versioned(txn.message)
+            signature = ExecutionConfig.PAYER_KEYPAIR.sign_message(message_bytes)
+            # Create a new signed transaction
             txn = VersionedTransaction.populate(txn.message, [signature])
             return txn
         except Exception as e:

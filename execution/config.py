@@ -25,3 +25,6 @@ class ExecutionConfig:
     
     SOL_MINT = "So11111111111111111111111111111111111111112"
     USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    
+    # Jupiter API Key (get from https://portal.jup.ag)
+    JUPITER_API_KEY = os.getenv("JUPITER_API_KEY", "")
