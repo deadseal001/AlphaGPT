@@ -98,9 +98,11 @@ class AdvancedFactorEngineer:
     def robust_norm(self, t):
         """Robust normalization using median absolute deviation"""
         median = torch.nanmedian(t, dim=1, keepdim=True)[0]
-        mad = torch.nanmedian(torch.abs(t - median), dim=1, keepdim=True)[0] + 1e-6
-        norm = (t - median) / mad
-        return torch.clamp(norm, -5.0, 5.0)
+        mad = torch.nanmedian(torch.abs(t - median), dim=1, keepdim=True)[0]
+        norm = (t - median) / (mad + 1e-6)
+        norm = torch.clamp(norm, -5.0, 5.0)
+        # If variance is too small, collapse to zeros
+        return torch.where(mad < 1e-5, torch.zeros_like(norm), norm)
     
     def compute_advanced_features(self, raw_dict):
         """Compute 12-dimensional feature space with advanced factors"""
@@ -175,9 +177,10 @@ class FeatureEngineer:
         
         def robust_norm(t):
             median = torch.nanmedian(t, dim=1, keepdim=True)[0]
-            mad = torch.nanmedian(torch.abs(t - median), dim=1, keepdim=True)[0] + 1e-6
-            norm = (t - median) / mad
-            return torch.clamp(norm, -5.0, 5.0)
+            mad = torch.nanmedian(torch.abs(t - median), dim=1, keepdim=True)[0]
+            norm = (t - median) / (mad + 1e-6)
+            norm = torch.clamp(norm, -5.0, 5.0)
+            return torch.where(mad < 1e-5, torch.zeros_like(norm), norm)
 
         features = torch.stack([
             robust_norm(ret),

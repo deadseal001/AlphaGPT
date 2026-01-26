@@ -106,8 +106,9 @@ class AlphaEngine:
                     formula_rewards_map[formula_tuple] = -5.0
                     continue
                 
-                if res.std() < 1e-4:
-                    formula_rewards_map[formula_tuple] = -2.0
+                res_std = res.std()
+                if res_std < 1e-3:
+                    formula_rewards_map[formula_tuple] = -4.0
                     continue
 
                 # Penalize formulas that overuse JUMP (often collapses signals to ~0)
@@ -120,8 +121,8 @@ class AlphaEngine:
                 # 回测
                 score, ret_val, big_drawdowns = self.bt.evaluate(res, self.loader.raw_data_cache, self.loader.target_ret)
 
-                # Add mild variance bonus to discourage flat signals
-                score = score + 0.1 * torch.tanh(res.std())
+                # Add variance bonus to discourage flat signals
+                score = score + 0.2 * torch.tanh(res_std)
                 formula_rewards_map[formula_tuple] = score
                 
                 # 记录最佳

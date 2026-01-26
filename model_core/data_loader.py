@@ -82,6 +82,17 @@ class CryptoDataLoader:
         # Only forward-fill small gaps (e.g., 5 minutes), don't fill large gaps with stale data
         pivot_df = pivot_df.fillna(method='ffill', limit=5)  # Limit ffill to 5 time periods
         pivot_df = pivot_df.fillna(0.0)  # Fill remaining with 0
+
+        # Filter out tokens with too many zero closes (likely stale/invalid)
+        if 'close' in pivot_df.columns.levels[0]:
+            close_df = pivot_df['close']
+            zero_frac = (close_df.values == 0).mean(axis=0)
+            keep_mask = zero_frac <= 0.3
+            keep_addrs = close_df.columns[keep_mask].tolist()
+            dropped = len(close_df.columns) - len(keep_addrs)
+            if dropped > 0:
+                print(f"⚠️  Dropping {dropped} tokens with >30% zero closes")
+                pivot_df = pivot_df.loc[:, pivot_df.columns.get_level_values(1).isin(keep_addrs)]
         
         print(f"✓ Loaded data for {len(pivot_df.columns.levels[1])} tokens, {len(pivot_df)} time steps")
 
