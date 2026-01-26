@@ -125,7 +125,13 @@ class DataManager:
                             else:
                                 logger.info(f"   ↳ Catch-up Loop {loop_i}: Fetching since {latest_ts_utc}")
 
-                    records = await self.birdeye.get_token_history(session, t['address'], time_from=time_from)
+                    records = await self.birdeye.get_token_history(
+                        session,
+                        t['address'],
+                        time_from=time_from,
+                        liquidity=t.get('liquidity', 0.0),
+                        fdv=t.get('fdv', 0.0)
+                    )
                     
                     if records:
                         await self.db.batch_insert_ohlcv(records)

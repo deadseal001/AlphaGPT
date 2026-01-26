@@ -183,6 +183,7 @@ class StrategyRunner:
                 logger.warning("⚠️  | Sanity check: signals are flat (all ~0). Strategy may be degenerate.")
                 logger.warning(f"🧪 | Strategy tokens: {self.formula}")
                 logger.warning(f"🧪 | Strategy decoded: {self._decode_formula(self.formula)}")
+                return
         except Exception:
             pass
         scores = torch.sigmoid(latest_signals).cpu().numpy() # 转为概率 0~1
@@ -338,7 +339,7 @@ class StrategyRunner:
             # 2. 询价: 1 Token -> ? SOL
             quote = await self.trader.jup.get_quote(
                 input_mint=token_addr,
-                output_mint=self.trader.config.SOL_MINT,
+                output_mint=ExecutionConfig.SOL_MINT,
                 amount_integer=amount_1_unit
             )
             

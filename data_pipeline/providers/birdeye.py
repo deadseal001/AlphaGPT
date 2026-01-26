@@ -68,7 +68,7 @@ class BirdeyeProvider(DataProvider):
                 logger.error(f"Price fetch failed for {address}: {e}")
         return 0.0
 
-    async def get_token_history(self, session, address, days=Config.HISTORY_DAYS, time_from=None, time_to=None, retry_count=0, max_retries=5):
+    async def get_token_history(self, session, address, days=Config.HISTORY_DAYS, time_from=None, time_to=None, liquidity=0.0, fdv=0.0, retry_count=0, max_retries=5):
         if time_to is None:
             time_to = int(datetime.now().timestamp())
         
@@ -106,8 +106,8 @@ class BirdeyeProvider(DataProvider):
                                 float(item['l']),                         # low
                                 float(item['c']),                         # close
                                 float(item['v']),                         # volume
-                                0.0,                                      # liquidity
-                                0.0,                                      # fdv
+                                float(liquidity),                         # liquidity
+                                float(fdv),                               # fdv
                                 'birdeye'                                 # source
                             ))
                         return formatted
@@ -120,7 +120,7 @@ class BirdeyeProvider(DataProvider):
                         logger.warning(f"⏳ Rate limited for {address[:8]}, waiting {wait_time}s before retry {retry_count + 2}/{max_retries + 1}...")
                         await asyncio.sleep(wait_time)
                         # Fix argument passing
-                        return await self.get_token_history(session, address, days=days, time_from=time_from, time_to=time_to, retry_count=retry_count + 1, max_retries=max_retries)
+                        return await self.get_token_history(session, address, days=days, time_from=time_from, time_to=time_to, liquidity=liquidity, fdv=fdv, retry_count=retry_count + 1, max_retries=max_retries)
                     else:
                         error_text = await resp.text()
                         logger.error(f"❌ HTTP {resp.status} for {address[:8]}")
